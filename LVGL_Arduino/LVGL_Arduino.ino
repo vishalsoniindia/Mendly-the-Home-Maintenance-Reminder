@@ -16,11 +16,11 @@
 #include <demos/lv_demos.h>
 #include "CST816S.h"
 #include "ui.h"
-#include <Preferences.h>
-Preferences preferences;
 
 #include <ESP32Time.h>  //{2.0.6}  [https://github.com/fbiego/ESP32Time]
 ESP32Time rtc;
+
+struct tm currentTime;
 
 struct tm startTimeAC;
 struct tm startTimeRO;
@@ -179,16 +179,25 @@ void printDateTime(struct tm timeinfo) {
   Serial.println();
 }
 
-// Function to check and load stored time from preferences with customizable key
-bool loadStoredTime(Preferences& preferences, const char* timeKey, struct tm& startTime) {
-  bool hasStoredTime = preferences.getBytesLength(timeKey) == sizeof(struct tm);
+float calculatePercentageComplete(struct tm current, struct tm start, struct tm target) {
+  time_t start_t = mktime(&start);
+  time_t current_t = mktime(&current);
+  time_t target_t = mktime(&target);
 
-  if (hasStoredTime) {
-    // Load stored time
-    preferences.getBytes(timeKey, &startTime, sizeof(struct tm));
-  }
+  // Calculate total duration and elapsed time in seconds
+  time_t totalDuration = target_t - start_t;
+  time_t elapsedTime = current_t - start_t;
 
-  return hasStoredTime;
+  // Ensure we don't divide by zero and handle edge cases
+  if (totalDuration <= 0) return 100.0;
+  if (elapsedTime <= 0) return 0.0;
+  if (elapsedTime >= totalDuration) return 100.0;
+
+  // Calculate percentage
+  float percentage = (float(elapsedTime) / float(totalDuration)) * 100.0;
+
+  // Clamp between 0 and 100
+  return constrain(percentage, 0.0, 100.0);
 }
 
 #define GFX_BL 2 // default backlight pin, you may replace DF_GFX_BL to actual backlight pin
@@ -275,18 +284,8 @@ void setup()
   // lv_demo_stress();
   ui_init();
 
-  // Initialize preferences
-  preferences.begin("multi-month-timer", false);
-
-  loadStoredTime(preferences, "startTimeAC", startTimeAC);
-  loadStoredTime(preferences, "startTimeRO", startTimeRO);
-  loadStoredTime(preferences, "startTimeVC", startTimeVC);
-  loadStoredTime(preferences, "startTimeEX", startTimeEX);
-
-  loadStoredTime(preferences, "targetTimeAC", targetTimeAC);
-  loadStoredTime(preferences, "targetTimeRO", targetTimeRO);
-  loadStoredTime(preferences, "targetTimeVC", targetTimeVC);
-  loadStoredTime(preferences, "targetTimeEX", targetTimeEX);
+  Serial.print("TIME SETUP: ");
+  printDateTime(rtc.getTimeStruct());
 
   Serial.println( "Setup done" );
   lv_scr_load(ui_bar);
@@ -303,80 +302,105 @@ void loop()
   lv_timer_handler(); /* let the GUI do its work */
   delay( 5 );
 
+  currentTime = rtc.getTimeStruct();
+
   if (is_ac_month_changed) {
     is_ac_month_changed = false;
 
-     ac_month = lv_dropdown_get_selected(ui_Dropdown1);
+    ac_month = lv_dropdown_get_selected(ui_Dropdown1);
     Serial.print("AC Month:");
     Serial.println(ac_month);
 
-
-    startTimeAC = rtc.getTimeStruct();
-    printDateTime(startTimeAC);
-    preferences.putBytes("startTimeAC", &startTimeAC, sizeof(struct tm));
-    targetTimeAC = calculateTargetTime(startTimeAC, ac_month);
+    startTimeAC = currentTime;
+    targetTimeAC = calculateTargetTime(currentTime, ac_month);
+    targetTimeAC.tm_sec = targetTimeAC.tm_sec + 10;
     printDateTime(targetTimeAC);
-    preferences.putBytes("targetTimeAC", &targetTimeAC, sizeof(struct tm));
 
   }
 
   if (is_ex_month_changed) {
     is_ex_month_changed = false;
 
-     ex_month = lv_dropdown_get_selected(ui_Dropdown3);
+    ex_month = lv_dropdown_get_selected(ui_Dropdown3);
+    Serial.print("EX Month:");
+    Serial.println(ex_month);
 
-    startTimeEX = rtc.getTimeStruct();
-    preferences.putBytes("startTimeEX", &startTimeEX, sizeof(struct tm));
-    targetTimeEX = calculateTargetTime(startTimeEX, ex_month);
-    preferences.putBytes("targetTimeEX", &targetTimeEX, sizeof(struct tm));
+    startTimeEX = currentTime;
+    targetTimeEX = calculateTargetTime(currentTime, ex_month);
   }
 
   if (is_vc_month_changed) {
     is_vc_month_changed = false;
 
-     vc_month = lv_dropdown_get_selected(ui_Dropdown2);
+    vc_month = lv_dropdown_get_selected(ui_Dropdown2);
+    Serial.print("VC Month:");
+    Serial.println(vc_month);
 
-    startTimeVC = rtc.getTimeStruct();
-    preferences.putBytes("startTimeVC", &startTimeVC, sizeof(struct tm));
-    targetTimeVC = calculateTargetTime(startTimeVC, vc_month);
-    preferences.putBytes("targetTimeVC", &targetTimeVC, sizeof(struct tm));
+    startTimeVC = currentTime;
+    targetTimeVC = calculateTargetTime(currentTime, vc_month);
   }
 
   if (is_ro_month_changed) {
     is_ro_month_changed = false;
 
-     ro_month = lv_dropdown_get_selected(ui_Dropdown4);
+    ro_month = lv_dropdown_get_selected(ui_Dropdown4);
+    Serial.print("RO Month:");
+    Serial.println(ro_month);
 
-    startTimeRO = rtc.getTimeStruct();
-    preferences.putBytes("startTimeRO", &startTimeRO, sizeof(struct tm));
-    targetTimeRO = calculateTargetTime(startTimeRO, ro_month);
-    preferences.putBytes("targetTimeRO", &targetTimeRO, sizeof(struct tm));
+    startTimeRO = currentTime;
+    targetTimeRO = calculateTargetTime(currentTime, ro_month);
   }
 
-  if (isTimeReached(startTimeAC, targetTimeAC) && !is_ac_alert && ac_month) {
+  if (isTimeReached(currentTime, targetTimeAC) && !is_ac_alert && ac_month) {
     is_ac_alert = true;
   }
-  if (isTimeReached(startTimeRO, targetTimeRO) && !is_ro_alert && ro_month) {
+  if (isTimeReached(currentTime, targetTimeRO) && !is_ro_alert && ro_month) {
     is_ro_alert = true;
   }
-  if (isTimeReached(startTimeVC, targetTimeVC) && !is_vc_alert && vc_month) {
+  if (isTimeReached(currentTime, targetTimeVC) && !is_vc_alert && vc_month) {
     is_vc_alert = true;
   }
-  if (isTimeReached(startTimeEX, targetTimeEX) && !is_ex_alert && ex_month) {
+  if (isTimeReached(currentTime, targetTimeEX) && !is_ex_alert && ex_month) {
     is_ex_alert = true;
   }
 
-  if(is_ac_alert){
+  if (is_ac_alert) {
     lv_scr_load(ui_acerror);
   }
-  else if(is_ro_alert){
+  else if (is_ro_alert) {
     lv_scr_load(ui_roerror);
   }
-  else if(is_vc_alert){
+  else if (is_vc_alert) {
     lv_scr_load(ui_vcerror);
   }
-  else if(is_ex_alert){
+  else if (is_ex_alert) {
     lv_scr_load(ui_exerror);
+  }
+
+  int percentage = calculatePercentageComplete(currentTime, startTimeAC, targetTimeAC);
+  lv_bar_set_value(ui_bar_ac, percentage , LV_ANIM_OFF);
+
+  percentage = calculatePercentageComplete(currentTime, startTimeRO, targetTimeRO);
+  lv_bar_set_value(ui_bar_ro, percentage , LV_ANIM_OFF);
+
+  percentage = calculatePercentageComplete(currentTime, startTimeEX, targetTimeEX);
+  lv_bar_set_value(ui_bar_ex, percentage , LV_ANIM_OFF);
+
+  percentage = calculatePercentageComplete(currentTime, startTimeVC, targetTimeVC);
+  lv_bar_set_value(ui_bar_vc, percentage , LV_ANIM_OFF);
+
+
+  if (!ex_month) {
+    lv_bar_set_value(ui_bar_ex, 0 , LV_ANIM_OFF);
+  }
+  if (!ac_month) {
+    lv_bar_set_value(ui_bar_ac, 0 , LV_ANIM_OFF);
+  }
+  if (!ro_month) {
+    lv_bar_set_value(ui_bar_ro, 0 , LV_ANIM_OFF);
+  }
+  if (!vc_month) {
+    lv_bar_set_value(ui_bar_vc, 0 , LV_ANIM_OFF);
   }
 
   //    if(millis() - previous > 10000){

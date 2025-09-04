@@ -21,6 +21,7 @@ void ui_event_Okayac(lv_event_t * e)
     if(event_code == LV_EVENT_CLICKED) {
         _ui_screen_change(&ui_bar, LV_SCR_LOAD_ANIM_NONE, 500, 0, &ui_bar_screen_init);
         is_ac_alert = false;
+        is_ac_month_changed = true;
     }
 }
 
